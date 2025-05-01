@@ -121,52 +121,116 @@
       let keyDownHandler = null;
       let keyUpHandler = null;
       
+      // Override RetroEngine's loadDisk to ensure it returns a proper Promise
+      const originalLoadDisk = RetroEngine.prototype.loadDisk;
+      RetroEngine.prototype.loadDisk = function(diskId) {
+        console.log("Loading disk: " + diskId);
+        try {
+          // Ensure original method is called with proper context
+          const result = originalLoadDisk.call(this, diskId);
+          
+          // If the result is already a Promise, return it
+          if (result && typeof result.then === 'function') {
+            return result;
+          }
+          
+          // Otherwise, create a new Promise
+          return new Promise((resolve, reject) => {
+            try {
+              // Set a timeout to give the engine time to initialize
+              setTimeout(() => {
+                if (this.currentGame) {
+                  console.log("Game loaded via timeout");
+                  resolve();
+                } else {
+                  console.error("Failed to load game after timeout");
+                  reject(new Error("Game load timeout"));
+                }
+              }, 1000);
+            } catch (err) {
+              console.error("Error in loadDisk promise:", err);
+              reject(err);
+            }
+          });
+        } catch (err) {
+          console.error("Error in loadDisk:", err);
+          return Promise.reject(err);
+        }
+      };
+      
       // Reset the entire game environment
       function resetGame() {
         console.log("Performing complete game reset");
         
-        // Remove existing event listeners
-        if (keyDownHandler) {
-          document.removeEventListener('keydown', keyDownHandler);
-          keyDownHandler = null;
-        }
-        if (keyUpHandler) {
-          document.removeEventListener('keyup', keyUpHandler);
-          keyUpHandler = null;
-        }
-        
-        // Clear the game container
-        while (gameContainer.firstChild) {
-          if (!gameContainer.firstChild.classList || 
-              (!gameContainer.firstChild.classList.contains('crt-effect') && 
-               !gameContainer.firstChild.classList.contains('scanlines') &&
-               !gameContainer.firstChild.classList.contains('game-message'))) {
-            gameContainer.removeChild(gameContainer.firstChild);
+        try {
+          // Remove existing event listeners
+          if (keyDownHandler) {
+            document.removeEventListener('keydown', keyDownHandler);
+            keyDownHandler = null;
           }
+          if (keyUpHandler) {
+            document.removeEventListener('keyup', keyUpHandler);
+            keyUpHandler = null;
+          }
+          
+          // Stop the current game loop
+          if (engine) {
+            engine.running = false;
+          }
+          
+          // Clear the game container
+          const elements = gameContainer.querySelectorAll('canvas');
+          elements.forEach(element => {
+            gameContainer.removeChild(element);
+          });
+          
+          // Create a completely new engine
+          engine = new RetroEngine(gameContainer);
+          
+          // Load the selected disk
+          console.log("Loading disk after reset: " + gameType);
+          return engine.loadDisk(gameType)
+            .then(() => {
+              console.log("Disk loaded successfully after reset");
+              console.log("New game initialized with " + 
+                        (engine.currentGame && engine.currentGame.enemies ? 
+                         engine.currentGame.enemies.length : 0) + " enemies");
+              
+              // Set up global keyboard handlers
+              setupGlobalHandlers();
+              
+              // Make sure game is running
+              engine.running = true;
+              
+              return Promise.resolve();
+            })
+            .catch(err => {
+              console.error("Error loading disk after reset:", err);
+              // Try direct approach if the promise-based approach fails
+              try {
+                engine = new RetroEngine(gameContainer);
+                engine.diskSystem.loadDisk(gameType);
+                engine.running = true;
+                setupGlobalHandlers();
+                return Promise.resolve();
+              } catch (e) {
+                console.error("Fallback loading also failed:", e);
+                alert("Failed to restart game. Please refresh the page.");
+                return Promise.reject(e);
+              }
+            });
+        } catch (err) {
+          console.error("Error in resetGame:", err);
+          return Promise.reject(err);
         }
-        
-        // Create a completely new engine
-        engine = new RetroEngine(gameContainer);
-        
-        // Load the selected disk
-        console.log("Loading disk after reset: " + gameType);
-        return engine.loadDisk(gameType).then(() => {
-          console.log("Disk loaded successfully after reset");
-          console.log("New game initialized with " + 
-                      (engine.currentGame && engine.currentGame.enemies ? 
-                       engine.currentGame.enemies.length : 0) + " enemies");
-          
-          // Set up global keyboard handlers
-          setupGlobalHandlers();
-          
-          return Promise.resolve();
-        });
       }
       
       // Function to show game messages with robust reset
       function showMessage(title, text, isGameOver = true) {
         // Stop the game loop
-        engine.running = false;
+        if (engine) {
+          engine.running = false;
+        }
         
         // Display the message
         messageTitle.textContent = title;
@@ -182,10 +246,16 @@
             // Perform complete game reset for game over
             resetGame().then(() => {
               console.log("Game reset complete");
+            }).catch(err => {
+              console.error("Error during game reset:", err);
+              // Force page reload if reset fails
+              window.location.reload();
             });
           } else {
             // Just resume for pause
-            engine.running = true;
+            if (engine) {
+              engine.running = true;
+            }
           }
         };
       }
@@ -194,7 +264,7 @@
       function setupGlobalHandlers() {
         // Handle keyboard for pausing
         keyDownHandler = function(e) {
-          if (engine.running) {
+          if (engine && engine.running) {
             // Pause with Escape key
             if (e.key === 'Escape') {
               showMessage('GAME PAUSED', 'Press CONTINUE to resume', false);
@@ -472,7 +542,13 @@
               clearInterval(interval);
               
               // Loading complete sound
-              this.engine.audioEngine.playSound('ready');
+              if (this.engine.audioEngine) {
+                try {
+                  this.engine.audioEngine.playSound('ready');
+                } catch (e) {
+                  console.warn("Could not play sound", e);
+                }
+              }
               
               setTimeout(resolve, 500);
             }
@@ -496,13 +572,20 @@
       // Initialize game on first load
       setupGlobalHandlers();
       console.log("Initial load of disk: " + gameType);
-      engine.loadDisk(gameType).then(() => {
-        console.log("Initial disk load complete");
-        
-        // Make sure container is focusable
-        gameContainer.tabIndex = 1;
-        gameContainer.focus();
-      });
+      
+      // Add error handling for initial load
+      engine.loadDisk(gameType)
+        .then(() => {
+          console.log("Initial disk load complete");
+          
+          // Make sure container is focusable
+          gameContainer.tabIndex = 1;
+          gameContainer.focus();
+        })
+        .catch((err) => {
+          console.error("Error during initial load:", err);
+          alert("Failed to load the game. Please refresh the page.");
+        });
     });
   </script>
 </body>
