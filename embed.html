@@ -366,6 +366,24 @@
         });
       };
       
+      // Enhance the game loading process to ensure proper restart
+      const originalLoadDisk = engine.loadDisk;
+      engine.loadDisk = function(diskId) {
+        // Reset any lingering game state first
+        if (engine.currentGame) {
+          if (engine.currentGame instanceof ArcadeGame) {
+            engine.currentGame.leftPressed = false;
+            engine.currentGame.rightPressed = false;
+            engine.currentGame.bullets = [];
+            engine.currentGame.enemies = [];
+            engine.currentGame.score = 0;
+          }
+        }
+        
+        // Call the original loadDisk method
+        return originalLoadDisk.call(this, diskId);
+      };
+      
       // Load the selected disk with debug
       console.log(`Loading disk: ${gameType}`);
       engine.loadDisk(gameType).then(() => {
