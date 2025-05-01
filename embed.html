@@ -341,11 +341,44 @@
           
           // Complete restart of the game to ensure clean state
           if (title === 'GAME OVER') {
-            // For a complete reset, reload the disk instead of just creating new enemies
-            engine.loadDisk(gameType).then(() => {
-              console.log("Game completely restarted after game over");
+            // For a complete reset, use a more direct approach to restart
+            try {
+              // First make sure we're not running
+              engine.running = false;
+              
+              // Clear the canvas to prevent visual glitches
+              const ctx = engine.ctx;
+              if (ctx) {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, engine.canvas.width, engine.canvas.height);
+              }
+              
+              // Reset game state
+              if (engine.currentGame) {
+                if (engine.currentGame instanceof ArcadeGame) {
+                  engine.currentGame.leftPressed = false;
+                  engine.currentGame.rightPressed = false;
+                  engine.currentGame.bullets = [];
+                  engine.currentGame.enemies = [];
+                  engine.currentGame.score = 0;
+                }
+              }
+              
+              // Create a new instance of the current game type
+              if (gameType === 'arcade') {
+                engine.currentGame = new ArcadeGame(engine);
+              } else if (gameType === 'adventure') {
+                engine.currentGame = new TextAdventure(engine);
+              } else if (gameType === 'demo') {
+                engine.currentGame = new DemoScene(engine);
+              }
+              
+              // Resume game loop
+              console.log("Game manually restarted after game over");
               engine.running = true;
-            });
+            } catch (err) {
+              console.error("Error during game restart:", err);
+            }
           } else {
             // For level complete or pause, just resume
             engine.running = true;
@@ -369,19 +402,37 @@
       // Enhance the game loading process to ensure proper restart
       const originalLoadDisk = engine.loadDisk;
       engine.loadDisk = function(diskId) {
-        // Reset any lingering game state first
-        if (engine.currentGame) {
-          if (engine.currentGame instanceof ArcadeGame) {
-            engine.currentGame.leftPressed = false;
-            engine.currentGame.rightPressed = false;
-            engine.currentGame.bullets = [];
-            engine.currentGame.enemies = [];
-            engine.currentGame.score = 0;
+        try {
+          // Reset any lingering game state first
+          if (engine.currentGame) {
+            if (engine.currentGame instanceof ArcadeGame) {
+              engine.currentGame.leftPressed = false;
+              engine.currentGame.rightPressed = false;
+              engine.currentGame.bullets = [];
+              engine.currentGame.enemies = [];
+              engine.currentGame.score = 0;
+            }
           }
+          
+          // Call the original loadDisk method
+          return originalLoadDisk.call(this, diskId);
+        } catch (err) {
+          console.error("Error during disk load:", err);
+          // Create a fallback implementation if the original fails
+          switch(diskId) {
+            case 'arcade':
+              this.currentGame = new ArcadeGame(this);
+              break;
+            case 'adventure':
+              this.currentGame = new TextAdventure(this);
+              break;
+            case 'demo':
+              this.currentGame = new DemoScene(this);
+              break;
+          }
+          this.running = true;
+          return Promise.resolve();
         }
-        
-        // Call the original loadDisk method
-        return originalLoadDisk.call(this, diskId);
       };
       
       // Load the selected disk with debug
