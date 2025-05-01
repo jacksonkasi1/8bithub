@@ -126,19 +126,54 @@
         this.score = 0;
         this.leftPressed = false;
         this.rightPressed = false;
+        this.gameOver = false;
         
         // Create initial enemies - ensure they are positioned correctly
         this.createEnemies();
         
         // Set up input handling
-        document.addEventListener('keydown', (e) => this.handleInput(e));
-        document.addEventListener('keyup', (e) => {
+        this.setupInputHandlers();
+      };
+      
+      // Separate input setup to allow re-binding on restart
+      ArcadeGame.prototype.setupInputHandlers = function() {
+        // Remove any existing event listeners to prevent duplicates
+        document.removeEventListener('keydown', this._handleKeyDown);
+        document.removeEventListener('keyup', this._handleKeyUp);
+        
+        // Create bound functions that we can reference later for removal
+        this._handleKeyDown = (e) => this.handleInput(e);
+        this._handleKeyUp = (e) => {
           if (e.key === 'ArrowLeft') {
             this.leftPressed = false;
           } else if (e.key === 'ArrowRight') {
             this.rightPressed = false;
           }
-        });
+        };
+        
+        // Add the event listeners
+        document.addEventListener('keydown', this._handleKeyDown);
+        document.addEventListener('keyup', this._handleKeyUp);
+      };
+      
+      // Add reset method for proper game restart
+      ArcadeGame.prototype.reset = function() {
+        this.playerX = 160;
+        this.playerY = 200;
+        this.bullets = [];
+        this.enemies = [];
+        this.score = 0;
+        this.leftPressed = false;
+        this.rightPressed = false;
+        this.gameOver = false;
+        
+        // Create new enemies
+        this.createEnemies();
+        
+        // Ensure input handlers are set up
+        this.setupInputHandlers();
+        
+        console.log("Game fully reset with " + this.enemies.length + " enemies");
       };
       
       // Add enemy creation method
@@ -212,6 +247,9 @@
       
       // Fix update method for better movement
       ArcadeGame.prototype.update = function() {
+        // Don't update if game is over
+        if (this.gameOver) return;
+        
         // Move player
         if (this.leftPressed) this.playerX = Math.max(10, this.playerX - 3);
         if (this.rightPressed) this.playerX = Math.min(310, this.playerX + 3);
@@ -248,8 +286,10 @@
           
           // Check for victory condition
           if (this.enemies.length === 0) {
+            this.gameOver = true;
             showMessage('LEVEL COMPLETE', 'Prepare for the next wave!', () => {
               this.score += 100; // Bonus for completing level
+              this.gameOver = false;
               this.createEnemies(); // Create new enemies for next level
             });
           }
@@ -257,13 +297,13 @@
           // Check if enemies reached player's level
           const enemyReachedBottom = this.enemies.some(enemy => enemy.y >= 190);
           if (enemyReachedBottom) {
+            this.gameOver = true;
             showMessage('GAME OVER', 'The aliens have invaded!', () => {
-              this.score = 0;
-              this.createEnemies();
+              this.reset();
             });
           }
-        } else {
-          // If no enemies, create them (safeguard)
+        } else if (!this.gameOver) {
+          // If no enemies and game not over, create them (safeguard)
           this.createEnemies();
         }
       };
@@ -303,9 +343,9 @@
           const enemy = this.enemies[i];
           
           if (Math.abs(this.playerX - enemy.x) < 15 && Math.abs(this.playerY - enemy.y) < 15) {
+            this.gameOver = true;
             showMessage('GAME OVER', 'Your spaceship was destroyed!', () => {
-              this.score = 0;
-              this.createEnemies();
+              this.reset();
             });
             break;
           }
@@ -314,6 +354,8 @@
       
       // Fix input handling
       ArcadeGame.prototype.handleInput = function(e) {
+        if (this.gameOver) return;
+        
         if (e.key === 'ArrowLeft') {
           this.leftPressed = true;
         } else if (e.key === 'ArrowRight') {
@@ -348,6 +390,21 @@
         };
       }
       
+      // Fix RetroEngine to handle game restarts properly
+      const originalEngineLoadDisk = RetroEngine.prototype.loadDisk;
+      RetroEngine.prototype.loadDisk = function(diskId) {
+        // Stop the current game loop if one is running
+        this.running = false;
+        
+        return originalEngineLoadDisk.call(this, diskId).then(() => {
+          console.log("Disk loaded successfully");
+          return Promise.resolve();
+        }).catch(err => {
+          console.error("Error loading disk:", err);
+          return Promise.reject(err);
+        });
+      };
+      
       // Ensure welcome animation plays fully
       const originalShowLoadingSequence = DiskSystem.prototype.showLoadingSequence;
       DiskSystem.prototype.showLoadingSequence = function(disk) {
@@ -380,7 +437,7 @@
           
           // Add game pause/resume functionality with Escape key
           if (e.key === 'Escape') {
-            if (engine.running) {
+            if (engine.running && !engine.currentGame.gameOver) {
               showMessage('GAME PAUSED', 'Press CONTINUE to resume', () => {
                 // Resume game
               });
