@@ -87,6 +87,43 @@
     .game-message button:hover {
       background-color: #555;
     }
+    
+    /* Initial start button */
+    .start-message {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: #FFFFFF;
+      font-family: 'Courier New', monospace;
+      text-align: center;
+      z-index: 30;
+    }
+    
+    .start-message h2 {
+      margin-bottom: 20px;
+      text-shadow: 2px 2px 0px #0055AA;
+    }
+    
+    .start-message button {
+      background-color: #333;
+      color: #FFF;
+      border: 2px solid #555;
+      padding: 10px 25px;
+      font-family: 'Courier New', monospace;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    
+    .start-message button:hover {
+      background-color: #555;
+    }
   </style>
 </head>
 <body>
@@ -98,65 +135,198 @@
       <p id="message-text">Your spaceship was destroyed!</p>
       <button id="continue-button">CONTINUE</button>
     </div>
+    <div class="start-message" id="start-message">
+      <h2>8-BIT ARCADE</h2>
+      <p>Click to start the game</p>
+      <button id="start-button">START GAME</button>
+    </div>
   </div>
   
   <script src="8bithub.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function() {
-      // Initialize the RetroEngine
+      // Initialize elements
       const gameContainer = document.getElementById('game-container');
       const gameMessage = document.getElementById('game-message');
       const messageTitle = document.getElementById('message-title');
       const messageText = document.getElementById('message-text');
       const continueButton = document.getElementById('continue-button');
+      const startMessage = document.getElementById('start-message');
+      const startButton = document.getElementById('start-button');
       
       // Get game type from URL hash or default to arcade
       const hash = window.location.hash.substring(1);
       const gameType = (hash && ['arcade', 'adventure', 'demo'].includes(hash)) ? hash : 'arcade';
       
-      // Create a new engine
-      let engine = new RetroEngine(gameContainer);
+      // Initialize flag to track if game is started
+      let gameStarted = false;
+      
+      // Create a new engine (but don't start it yet)
+      let engine = null;
       
       // Store key event handlers to remove them later
       let keyDownHandler = null;
       let keyUpHandler = null;
       
-      // Override RetroEngine's loadDisk to ensure it returns a proper Promise
-      const originalLoadDisk = RetroEngine.prototype.loadDisk;
-      RetroEngine.prototype.loadDisk = function(diskId) {
-        console.log("Loading disk: " + diskId);
-        try {
-          // Ensure original method is called with proper context
-          const result = originalLoadDisk.call(this, diskId);
-          
-          // If the result is already a Promise, return it
-          if (result && typeof result.then === 'function') {
-            return result;
-          }
-          
-          // Otherwise, create a new Promise
-          return new Promise((resolve, reject) => {
-            try {
-              // Set a timeout to give the engine time to initialize
-              setTimeout(() => {
-                if (this.currentGame) {
-                  console.log("Game loaded via timeout");
-                  resolve();
-                } else {
-                  console.error("Failed to load game after timeout");
-                  reject(new Error("Game load timeout"));
-                }
-              }, 1000);
-            } catch (err) {
-              console.error("Error in loadDisk promise:", err);
-              reject(err);
-            }
-          });
-        } catch (err) {
-          console.error("Error in loadDisk:", err);
-          return Promise.reject(err);
+      // Ensure proper canvas creation and display
+      function ensureCanvasIsVisible() {
+        const canvas = gameContainer.querySelector('canvas');
+        if (canvas) {
+          // Make sure the canvas is visible and positioned correctly
+          canvas.style.position = 'absolute';
+          canvas.style.top = '0';
+          canvas.style.left = '0';
+          canvas.style.zIndex = '5';
+          canvas.style.display = 'block';
+        } else {
+          console.error("No canvas found in game container");
         }
-      };
+      }
+      
+      // Initialize the game only after user interaction
+      function initializeGame() {
+        if (gameStarted) return;
+        gameStarted = true;
+        
+        // Hide start message
+        startMessage.style.display = 'none';
+        
+        // Create the engine
+        engine = new RetroEngine(gameContainer);
+        
+        // Override audio initialization for browser compatibility
+        if (engine.audioEngine) {
+          const originalCreateSound = engine.audioEngine.createSound;
+          engine.audioEngine.createSound = function(name, patterns) {
+            try {
+              return originalCreateSound.call(this, name, patterns);
+            } catch (e) {
+              console.warn("Audio initialization failed:", e);
+              return null;
+            }
+          };
+          
+          const originalPlaySound = engine.audioEngine.playSound;
+          engine.audioEngine.playSound = function(name) {
+            try {
+              if (this.audioCtx && this.audioCtx.state === 'suspended') {
+                this.audioCtx.resume();
+              }
+              return originalPlaySound.call(this, name);
+            } catch (e) {
+              console.warn("Playing sound failed:", e);
+              return null;
+            }
+          };
+        }
+        
+        // Override RetroEngine's loadDisk to ensure it returns a proper Promise
+        const originalLoadDisk = RetroEngine.prototype.loadDisk;
+        RetroEngine.prototype.loadDisk = function(diskId) {
+          console.log("Loading disk: " + diskId);
+          try {
+            // Ensure original method is called with proper context
+            const result = originalLoadDisk.call(this, diskId);
+            
+            // If the result is already a Promise, return it
+            if (result && typeof result.then === 'function') {
+              return result;
+            }
+            
+            // Otherwise, create a new Promise
+            return new Promise((resolve, reject) => {
+              try {
+                // Set a timeout to give the engine time to initialize
+                setTimeout(() => {
+                  if (this.currentGame) {
+                    console.log("Game loaded via timeout");
+                    ensureCanvasIsVisible();
+                    resolve();
+                  } else {
+                    console.log("Creating new game forcibly");
+                    // If game still not loaded, try to create it manually
+                    try {
+                      switch(diskId) {
+                        case 'arcade':
+                          this.currentGame = new ArcadeGame(this);
+                          break;
+                        case 'adventure':
+                          this.currentGame = new TextAdventure(this);
+                          break;
+                        case 'demo':
+                          this.currentGame = new DemoScene(this);
+                          break;
+                      }
+                      
+                      // Make sure canvas is visible
+                      ensureCanvasIsVisible();
+                      
+                      // Start game loop
+                      this.running = true;
+                      this.gameLoop();
+                      
+                      console.log("Game loaded successfully");
+                      resolve();
+                    } catch (e) {
+                      console.error("Failed to create game:", e);
+                      reject(new Error("Game creation failed"));
+                    }
+                  }
+                }, 1000);
+              } catch (err) {
+                console.error("Error in loadDisk promise:", err);
+                reject(err);
+              }
+            });
+          } catch (err) {
+            console.error("Error in loadDisk:", err);
+            return Promise.reject(err);
+          }
+        };
+        
+        // Start the game
+        loadGame();
+      }
+      
+      // Function to load/reload the game
+      function loadGame() {
+        if (!engine) {
+          console.error("Engine not initialized");
+          return Promise.reject(new Error("Engine not initialized"));
+        }
+        
+        // Stop any existing game
+        engine.running = false;
+        
+        // Clear the game container (only canvas elements)
+        const canvases = gameContainer.querySelectorAll('canvas');
+        canvases.forEach(canvas => gameContainer.removeChild(canvas));
+        
+        // Load the selected disk
+        console.log("Loading game: " + gameType);
+        return engine.loadDisk(gameType)
+          .then(() => {
+            console.log("Game loaded successfully");
+            
+            // Set up global keyboard handlers
+            setupGlobalHandlers();
+            
+            // Make game container focusable
+            gameContainer.tabIndex = 1;
+            gameContainer.focus();
+            
+            // Start the game loop
+            engine.running = true;
+            engine.gameLoop();
+            
+            return Promise.resolve();
+          })
+          .catch(err => {
+            console.error("Error loading game:", err);
+            showStartMessage("ERROR: Game failed to load. Click to try again.");
+            return Promise.reject(err);
+          });
+      }
       
       // Reset the entire game environment
       function resetGame() {
@@ -179,9 +349,9 @@
           }
           
           // Clear the game container
-          const elements = gameContainer.querySelectorAll('canvas');
-          elements.forEach(element => {
-            gameContainer.removeChild(element);
+          const canvases = gameContainer.querySelectorAll('canvas');
+          canvases.forEach(canvas => {
+            gameContainer.removeChild(canvas);
           });
           
           // Create a completely new engine
@@ -201,6 +371,10 @@
               
               // Make sure game is running
               engine.running = true;
+              engine.gameLoop();
+              
+              // Ensure canvas is visible
+              ensureCanvasIsVisible();
               
               return Promise.resolve();
             })
@@ -211,11 +385,12 @@
                 engine = new RetroEngine(gameContainer);
                 engine.diskSystem.loadDisk(gameType);
                 engine.running = true;
+                engine.gameLoop();
                 setupGlobalHandlers();
+                ensureCanvasIsVisible();
                 return Promise.resolve();
               } catch (e) {
                 console.error("Fallback loading also failed:", e);
-                alert("Failed to restart game. Please refresh the page.");
                 return Promise.reject(e);
               }
             });
@@ -223,6 +398,15 @@
           console.error("Error in resetGame:", err);
           return Promise.reject(err);
         }
+      }
+      
+      // Function to show start message
+      function showStartMessage(message) {
+        const msgElement = startMessage.querySelector('p');
+        if (msgElement) {
+          msgElement.textContent = message || "Click to start the game";
+        }
+        startMessage.style.display = 'flex';
       }
       
       // Function to show game messages with robust reset
@@ -248,13 +432,13 @@
               console.log("Game reset complete");
             }).catch(err => {
               console.error("Error during game reset:", err);
-              // Force page reload if reset fails
-              window.location.reload();
+              showStartMessage("ERROR: Game reset failed. Click to try again.");
             });
           } else {
             // Just resume for pause
             if (engine) {
               engine.running = true;
+              engine.gameLoop();
             }
           }
         };
@@ -262,6 +446,11 @@
       
       // Set up global keyboard handlers
       function setupGlobalHandlers() {
+        // Remove any existing handlers
+        if (keyDownHandler) {
+          document.removeEventListener('keydown', keyDownHandler);
+        }
+        
         // Handle keyboard for pausing
         keyDownHandler = function(e) {
           if (engine && engine.running) {
@@ -569,23 +758,20 @@
         });
       };
       
-      // Initialize game on first load
-      setupGlobalHandlers();
-      console.log("Initial load of disk: " + gameType);
+      // Set up start button and event listeners
+      startButton.addEventListener('click', initializeGame);
+      gameContainer.addEventListener('click', initializeGame);
       
-      // Add error handling for initial load
-      engine.loadDisk(gameType)
-        .then(() => {
-          console.log("Initial disk load complete");
-          
-          // Make sure container is focusable
-          gameContainer.tabIndex = 1;
-          gameContainer.focus();
-        })
-        .catch((err) => {
-          console.error("Error during initial load:", err);
-          alert("Failed to load the game. Please refresh the page.");
-        });
+      // Also allow keyboard to start
+      document.addEventListener('keydown', function startGameOnKeypress(e) {
+        if (!gameStarted) {
+          initializeGame();
+          document.removeEventListener('keydown', startGameOnKeypress);
+        }
+      });
+      
+      // Display initial start message
+      showStartMessage();
     });
   </script>
 </body>
