@@ -6,12 +6,14 @@
 
 For clean embedding that shows only the game, use this iframe pointing to embed.html:
 
+<!-- markdownlint-disable MD033 -->
 <iframe
 src="https://jacksonkasi1.github.io/8bithub/embed.html"
   width="320"
   height="240"
   frameborder="0">
 </iframe>
+<!-- markdownlint-enable MD033 -->
 
 ```html
 <iframe
