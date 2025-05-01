@@ -87,43 +87,6 @@
     .game-message button:hover {
       background-color: #555;
     }
-    
-    /* Initial start button */
-    .start-message {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      background-color: rgba(0, 0, 0, 0.8);
-      color: #FFFFFF;
-      font-family: 'Courier New', monospace;
-      text-align: center;
-      z-index: 30;
-    }
-    
-    .start-message h2 {
-      margin-bottom: 20px;
-      text-shadow: 2px 2px 0px #0055AA;
-    }
-    
-    .start-message button {
-      background-color: #333;
-      color: #FFF;
-      border: 2px solid #555;
-      padding: 10px 25px;
-      font-family: 'Courier New', monospace;
-      cursor: pointer;
-      font-size: 16px;
-    }
-    
-    .start-message button:hover {
-      background-color: #555;
-    }
   </style>
 </head>
 <body>
@@ -135,342 +98,25 @@
       <p id="message-text">Your spaceship was destroyed!</p>
       <button id="continue-button">CONTINUE</button>
     </div>
-    <div class="start-message" id="start-message">
-      <h2>8-BIT ARCADE</h2>
-      <p>Click to start the game</p>
-      <button id="start-button">START GAME</button>
-    </div>
   </div>
   
   <script src="8bithub.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function() {
-      // Initialize elements
+      // Initialize the RetroEngine
       const gameContainer = document.getElementById('game-container');
+      const engine = new RetroEngine(gameContainer);
       const gameMessage = document.getElementById('game-message');
       const messageTitle = document.getElementById('message-title');
       const messageText = document.getElementById('message-text');
       const continueButton = document.getElementById('continue-button');
-      const startMessage = document.getElementById('start-message');
-      const startButton = document.getElementById('start-button');
       
       // Get game type from URL hash or default to arcade
       const hash = window.location.hash.substring(1);
       const gameType = (hash && ['arcade', 'adventure', 'demo'].includes(hash)) ? hash : 'arcade';
       
-      // Initialize flag to track if game is started
-      let gameStarted = false;
-      
-      // Create a new engine (but don't start it yet)
-      let engine = null;
-      
-      // Store key event handlers to remove them later
-      let keyDownHandler = null;
-      let keyUpHandler = null;
-      
-      // Ensure proper canvas creation and display
-      function ensureCanvasIsVisible() {
-        const canvas = gameContainer.querySelector('canvas');
-        if (canvas) {
-          // Make sure the canvas is visible and positioned correctly
-          canvas.style.position = 'absolute';
-          canvas.style.top = '0';
-          canvas.style.left = '0';
-          canvas.style.zIndex = '5';
-          canvas.style.display = 'block';
-        } else {
-          console.error("No canvas found in game container");
-        }
-      }
-      
-      // Initialize the game only after user interaction
-      function initializeGame() {
-        if (gameStarted) return;
-        gameStarted = true;
-        
-        // Hide start message
-        startMessage.style.display = 'none';
-        
-        // Create the engine
-        engine = new RetroEngine(gameContainer);
-        
-        // Override audio initialization for browser compatibility
-        if (engine.audioEngine) {
-          const originalCreateSound = engine.audioEngine.createSound;
-          engine.audioEngine.createSound = function(name, patterns) {
-            try {
-              return originalCreateSound.call(this, name, patterns);
-            } catch (e) {
-              console.warn("Audio initialization failed:", e);
-              return null;
-            }
-          };
-          
-          const originalPlaySound = engine.audioEngine.playSound;
-          engine.audioEngine.playSound = function(name) {
-            try {
-              if (this.audioCtx && this.audioCtx.state === 'suspended') {
-                this.audioCtx.resume();
-              }
-              return originalPlaySound.call(this, name);
-            } catch (e) {
-              console.warn("Playing sound failed:", e);
-              return null;
-            }
-          };
-        }
-        
-        // Override RetroEngine's loadDisk to ensure it returns a proper Promise
-        const originalLoadDisk = RetroEngine.prototype.loadDisk;
-        RetroEngine.prototype.loadDisk = function(diskId) {
-          console.log("Loading disk: " + diskId);
-          try {
-            // Ensure original method is called with proper context
-            const result = originalLoadDisk.call(this, diskId);
-            
-            // If the result is already a Promise, return it
-            if (result && typeof result.then === 'function') {
-              return result;
-            }
-            
-            // Otherwise, create a new Promise
-            return new Promise((resolve, reject) => {
-              try {
-                // Set a timeout to give the engine time to initialize
-                setTimeout(() => {
-                  if (this.currentGame) {
-                    console.log("Game loaded via timeout");
-                    ensureCanvasIsVisible();
-                    resolve();
-                  } else {
-                    console.log("Creating new game forcibly");
-                    // If game still not loaded, try to create it manually
-                    try {
-                      switch(diskId) {
-                        case 'arcade':
-                          this.currentGame = new ArcadeGame(this);
-                          break;
-                        case 'adventure':
-                          this.currentGame = new TextAdventure(this);
-                          break;
-                        case 'demo':
-                          this.currentGame = new DemoScene(this);
-                          break;
-                      }
-                      
-                      // Make sure canvas is visible
-                      ensureCanvasIsVisible();
-                      
-                      // Start game loop
-                      this.running = true;
-                      this.gameLoop();
-                      
-                      console.log("Game loaded successfully");
-                      resolve();
-                    } catch (e) {
-                      console.error("Failed to create game:", e);
-                      reject(new Error("Game creation failed"));
-                    }
-                  }
-                }, 1000);
-              } catch (err) {
-                console.error("Error in loadDisk promise:", err);
-                reject(err);
-              }
-            });
-          } catch (err) {
-            console.error("Error in loadDisk:", err);
-            return Promise.reject(err);
-          }
-        };
-        
-        // Start the game
-        loadGame();
-      }
-      
-      // Function to load/reload the game
-      function loadGame() {
-        if (!engine) {
-          console.error("Engine not initialized");
-          return Promise.reject(new Error("Engine not initialized"));
-        }
-        
-        // Stop any existing game
-        engine.running = false;
-        
-        // Clear the game container (only canvas elements)
-        const canvases = gameContainer.querySelectorAll('canvas');
-        canvases.forEach(canvas => gameContainer.removeChild(canvas));
-        
-        // Load the selected disk
-        console.log("Loading game: " + gameType);
-        return engine.loadDisk(gameType)
-          .then(() => {
-            console.log("Game loaded successfully");
-            
-            // Set up global keyboard handlers
-            setupGlobalHandlers();
-            
-            // Make game container focusable
-            gameContainer.tabIndex = 1;
-            gameContainer.focus();
-            
-            // Start the game loop
-            engine.running = true;
-            engine.gameLoop();
-            
-            return Promise.resolve();
-          })
-          .catch(err => {
-            console.error("Error loading game:", err);
-            showStartMessage("ERROR: Game failed to load. Click to try again.");
-            return Promise.reject(err);
-          });
-      }
-      
-      // Reset the entire game environment
-      function resetGame() {
-        console.log("Performing complete game reset");
-        
-        try {
-          // Remove existing event listeners
-          if (keyDownHandler) {
-            document.removeEventListener('keydown', keyDownHandler);
-            keyDownHandler = null;
-          }
-          if (keyUpHandler) {
-            document.removeEventListener('keyup', keyUpHandler);
-            keyUpHandler = null;
-          }
-          
-          // Stop the current game loop
-          if (engine) {
-            engine.running = false;
-          }
-          
-          // Clear the game container
-          const canvases = gameContainer.querySelectorAll('canvas');
-          canvases.forEach(canvas => {
-            gameContainer.removeChild(canvas);
-          });
-          
-          // Create a completely new engine
-          engine = new RetroEngine(gameContainer);
-          
-          // Load the selected disk
-          console.log("Loading disk after reset: " + gameType);
-          return engine.loadDisk(gameType)
-            .then(() => {
-              console.log("Disk loaded successfully after reset");
-              console.log("New game initialized with " + 
-                        (engine.currentGame && engine.currentGame.enemies ? 
-                         engine.currentGame.enemies.length : 0) + " enemies");
-              
-              // Set up global keyboard handlers
-              setupGlobalHandlers();
-              
-              // Make sure game is running
-              engine.running = true;
-              engine.gameLoop();
-              
-              // Ensure canvas is visible
-              ensureCanvasIsVisible();
-              
-              return Promise.resolve();
-            })
-            .catch(err => {
-              console.error("Error loading disk after reset:", err);
-              // Try direct approach if the promise-based approach fails
-              try {
-                engine = new RetroEngine(gameContainer);
-                engine.diskSystem.loadDisk(gameType);
-                engine.running = true;
-                engine.gameLoop();
-                setupGlobalHandlers();
-                ensureCanvasIsVisible();
-                return Promise.resolve();
-              } catch (e) {
-                console.error("Fallback loading also failed:", e);
-                return Promise.reject(e);
-              }
-            });
-        } catch (err) {
-          console.error("Error in resetGame:", err);
-          return Promise.reject(err);
-        }
-      }
-      
-      // Function to show start message
-      function showStartMessage(message) {
-        const msgElement = startMessage.querySelector('p');
-        if (msgElement) {
-          msgElement.textContent = message || "Click to start the game";
-        }
-        startMessage.style.display = 'flex';
-      }
-      
-      // Function to show game messages with robust reset
-      function showMessage(title, text, isGameOver = true) {
-        // Stop the game loop
-        if (engine) {
-          engine.running = false;
-        }
-        
-        // Display the message
-        messageTitle.textContent = title;
-        messageText.textContent = text;
-        gameMessage.style.display = 'flex';
-        
-        // Set up continue button
-        continueButton.onclick = function() {
-          // Hide the message
-          gameMessage.style.display = 'none';
-          
-          if (isGameOver) {
-            // Perform complete game reset for game over
-            resetGame().then(() => {
-              console.log("Game reset complete");
-            }).catch(err => {
-              console.error("Error during game reset:", err);
-              showStartMessage("ERROR: Game reset failed. Click to try again.");
-            });
-          } else {
-            // Just resume for pause
-            if (engine) {
-              engine.running = true;
-              engine.gameLoop();
-            }
-          }
-        };
-      }
-      
-      // Set up global keyboard handlers
-      function setupGlobalHandlers() {
-        // Remove any existing handlers
-        if (keyDownHandler) {
-          document.removeEventListener('keydown', keyDownHandler);
-        }
-        
-        // Handle keyboard for pausing
-        keyDownHandler = function(e) {
-          if (engine && engine.running) {
-            // Pause with Escape key
-            if (e.key === 'Escape') {
-              showMessage('GAME PAUSED', 'Press CONTINUE to resume', false);
-            }
-            
-            // Handle Text Adventure special case
-            if (engine.currentGame instanceof TextAdventure && e.key.length === 1) {
-              gameContainer.focus();
-            }
-          }
-        };
-        
-        document.addEventListener('keydown', keyDownHandler);
-      }
-      
-      // Override ArcadeGame to integrate with our reset system
-      const OriginalArcadeGame = ArcadeGame;
+      // Fix and override ArcadeGame constructor to ensure enemies are created properly
+      const originalArcadeGameConstructor = ArcadeGame.prototype.constructor;
       ArcadeGame = function(engine) {
         this.engine = engine;
         this.playerX = 160;
@@ -481,22 +127,25 @@
         this.leftPressed = false;
         this.rightPressed = false;
         
-        // Create enemies
+        // Create initial enemies - ensure they are positioned correctly
         this.createEnemies();
         
-        // Set up input handling specific to this game instance
-        this.setupInputHandlers();
+        // Set up input handling
+        document.addEventListener('keydown', (e) => this.handleInput(e));
+        document.addEventListener('keyup', (e) => {
+          if (e.key === 'ArrowLeft') {
+            this.leftPressed = false;
+          } else if (e.key === 'ArrowRight') {
+            this.rightPressed = false;
+          }
+        });
       };
       
-      // Clone prototype methods from original
-      ArcadeGame.prototype = Object.create(OriginalArcadeGame.prototype);
-      
-      // Add method to create enemies
+      // Add enemy creation method
       ArcadeGame.prototype.createEnemies = function() {
-        // Clear any existing enemies
-        this.enemies = [];
+        this.enemies = []; // Clear existing enemies
         
-        // Create 3 rows of enemies in a grid
+        // Create 3 rows of enemies
         for (let row = 0; row < 3; row++) {
           for (let col = 0; col < 8; col++) {
             this.enemies.push({
@@ -504,7 +153,7 @@
               y: 40 + row * 20,
               direction: 1,
               frame: 0,
-              type: row % 3
+              type: row % 3 // Different enemy types
             });
           }
         }
@@ -512,102 +161,7 @@
         console.log(`Created ${this.enemies.length} enemies`);
       };
       
-      // Set up input handlers specific to the game
-      ArcadeGame.prototype.setupInputHandlers = function() {
-        // Remove any existing handlers to prevent duplicates
-        if (this._keyDownHandler) {
-          document.removeEventListener('keydown', this._keyDownHandler);
-        }
-        if (this._keyUpHandler) {
-          document.removeEventListener('keyup', this._keyUpHandler);
-        }
-        
-        // Create bound handlers
-        this._keyDownHandler = (e) => {
-          if (e.key === 'ArrowLeft') {
-            this.leftPressed = true;
-          } else if (e.key === 'ArrowRight') {
-            this.rightPressed = true;
-          } else if (e.key === ' ' || e.key === 'Space') {
-            if (this.bullets.length < 5) {
-              this.bullets.push({
-                x: this.playerX,
-                y: this.playerY - 5
-              });
-              
-              if (this.engine.audioEngine) {
-                this.engine.audioEngine.playSound('shoot');
-              }
-            }
-          }
-        };
-        
-        this._keyUpHandler = (e) => {
-          if (e.key === 'ArrowLeft') {
-            this.leftPressed = false;
-          } else if (e.key === 'ArrowRight') {
-            this.rightPressed = false;
-          }
-        };
-        
-        // Add event listeners
-        document.addEventListener('keydown', this._keyDownHandler);
-        document.addEventListener('keyup', this._keyUpHandler);
-      };
-      
-      // Update method
-      ArcadeGame.prototype.update = function() {
-        // Move player
-        if (this.leftPressed) this.playerX = Math.max(10, this.playerX - 3);
-        if (this.rightPressed) this.playerX = Math.min(310, this.playerX + 3);
-        
-        // Update bullets
-        this.bullets.forEach(bullet => {
-          bullet.y -= 5;
-        });
-        this.bullets = this.bullets.filter(bullet => bullet.y > 0);
-        
-        // Update enemies
-        let changeDirection = false;
-        
-        // Only proceed with enemy updates if we have enemies
-        if (this.enemies.length > 0) {
-          this.enemies.forEach(enemy => {
-            enemy.x += enemy.direction;
-            enemy.frame = (enemy.frame + 1) % 30;
-            
-            if (enemy.x <= 10 || enemy.x >= 310) {
-              changeDirection = true;
-            }
-          });
-          
-          if (changeDirection) {
-            this.enemies.forEach(enemy => {
-              enemy.direction *= -1;
-              enemy.y += 10;
-            });
-          }
-          
-          // Check for collisions
-          this.checkCollisions();
-          
-          // Check for victory
-          if (this.enemies.length === 0) {
-            showMessage('LEVEL COMPLETE', 'Prepare for the next wave!');
-          }
-          
-          // Check if enemies reached bottom
-          const enemyReachedBottom = this.enemies.some(enemy => enemy.y >= 190);
-          if (enemyReachedBottom) {
-            showMessage('GAME OVER', 'The aliens have invaded!');
-          }
-        } else {
-          // Safeguard - if no enemies, create them
-          this.createEnemies();
-        }
-      };
-      
-      // Render method
+      // Override render to make enemies more visible
       ArcadeGame.prototype.render = function(ctx, palette) {
         // Clear the screen
         ctx.fillStyle = palette[0]; // Black background
@@ -656,7 +210,63 @@
         ctx.fillText(`ENEMIES: ${this.enemies.length}`, 10, 30);
       };
       
-      // Check for collisions
+      // Fix update method for better movement
+      ArcadeGame.prototype.update = function() {
+        // Move player
+        if (this.leftPressed) this.playerX = Math.max(10, this.playerX - 3);
+        if (this.rightPressed) this.playerX = Math.min(310, this.playerX + 3);
+        
+        // Update bullets
+        this.bullets.forEach(bullet => {
+          bullet.y -= 5;
+        });
+        this.bullets = this.bullets.filter(bullet => bullet.y > 0);
+        
+        // Update enemies
+        let changeDirection = false;
+        
+        // Only proceed with enemy updates if we have enemies
+        if (this.enemies.length > 0) {
+          this.enemies.forEach(enemy => {
+            enemy.x += enemy.direction;
+            enemy.frame = (enemy.frame + 1) % 30;
+            
+            if (enemy.x <= 10 || enemy.x >= 310) {
+              changeDirection = true;
+            }
+          });
+          
+          if (changeDirection) {
+            this.enemies.forEach(enemy => {
+              enemy.direction *= -1;
+              enemy.y += 10;
+            });
+          }
+          
+          // Check collisions
+          this.checkCollisions();
+          
+          // Check for victory condition
+          if (this.enemies.length === 0) {
+            showMessage('LEVEL COMPLETE', 'Prepare for the next wave!', () => {
+              this.score += 100; // Bonus for completing level
+              this.createEnemies(); // Create new enemies for next level
+            });
+          }
+          
+          // Check if enemies reached player's level
+          const enemyReachedBottom = this.enemies.some(enemy => enemy.y >= 190);
+          if (enemyReachedBottom) {
+            showMessage('GAME OVER', 'The aliens have invaded!', null);
+            return; // Stop further updates to prevent state changes during reset
+          }
+        } else {
+          // If no enemies, create them (safeguard)
+          this.createEnemies();
+        }
+      };
+      
+      // Fix collision checking
       ArcadeGame.prototype.checkCollisions = function() {
         // Check bullet-enemy collisions
         for (let i = this.bullets.length - 1; i >= 0; i--) {
@@ -691,87 +301,103 @@
           const enemy = this.enemies[i];
           
           if (Math.abs(this.playerX - enemy.x) < 15 && Math.abs(this.playerY - enemy.y) < 15) {
-            showMessage('GAME OVER', 'Your spaceship was destroyed!');
-            break;
+            showMessage('GAME OVER', 'Your spaceship was destroyed!', null);
+            return; // Stop further updates to prevent state changes during reset
           }
         }
       };
       
-      // Set up loading animation
-      DiskSystem.prototype.showLoadingSequence = function(disk) {
-        // Original implementation with a promise wrapper
-        const ctx = this.engine.ctx;
-        const width = this.engine.canvas.width;
-        const height = this.engine.canvas.height;
-        
-        // Draw disk image
-        this.drawDisk(ctx, width/2, height/2 - 40, disk.color, disk.title);
-        
-        // Loading text
-        ctx.fillStyle = this.engine.palette[15];
-        ctx.font = '8px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('LOADING...', width/2, height/2 + 50);
-        
-        // Progress bar
-        const progressWidth = 160;
-        const progressHeight = 8;
-        const progressX = (width - progressWidth) / 2;
-        const progressY = height/2 + 60;
-        
-        ctx.strokeStyle = this.engine.palette[15];
-        ctx.strokeRect(progressX, progressY, progressWidth, progressHeight);
-        
-        // Simulate loading with proper Promise
-        return new Promise(resolve => {
-          let progress = 0;
-          const interval = setInterval(() => {
-            progress += Math.random() * 5;
-            if (progress >= 100) {
-              clearInterval(interval);
-              
-              // Loading complete sound
-              if (this.engine.audioEngine) {
-                try {
-                  this.engine.audioEngine.playSound('ready');
-                } catch (e) {
-                  console.warn("Could not play sound", e);
-                }
-              }
-              
-              setTimeout(resolve, 500);
+      // Fix input handling
+      ArcadeGame.prototype.handleInput = function(e) {
+        if (e.key === 'ArrowLeft') {
+          this.leftPressed = true;
+        } else if (e.key === 'ArrowRight') {
+          this.rightPressed = true;
+        } else if (e.key === ' ' || e.key === 'Space') {
+          // Limit the number of bullets to prevent spam
+          if (this.bullets.length < 5) {
+            this.bullets.push({
+              x: this.playerX,
+              y: this.playerY - 5
+            });
+            
+            // Play shoot sound
+            if (this.engine.audioEngine) {
+              this.engine.audioEngine.playSound('shoot');
             }
-            
-            // Update progress bar
-            const fillWidth = (progress / 100) * progressWidth;
-            ctx.fillStyle = disk.color;
-            ctx.fillRect(progressX, progressY, fillWidth, progressHeight);
-            
-            // Add loading noise
-            this.drawLoadingNoise(ctx, width, height);
-            
-            // Loading bytes text
-            ctx.fillStyle = this.engine.palette[15];
-            ctx.fillText(`LOADING BYTES: ${Math.floor(progress * 640)}`, width/2, height/2 + 80);
-            
-          }, 200);
+          }
+        }
+      };
+      
+      // Function to show game messages
+      function showMessage(title, text, callback) {
+        engine.running = false;
+        messageTitle.textContent = title;
+        messageText.textContent = text;
+        gameMessage.style.display = 'flex';
+        
+        continueButton.onclick = function() {
+          gameMessage.style.display = 'none';
+          
+          // Complete restart of the game to ensure clean state
+          if (title === 'GAME OVER') {
+            // For a complete reset, reload the disk instead of just creating new enemies
+            engine.loadDisk(gameType).then(() => {
+              console.log("Game completely restarted after game over");
+              engine.running = true;
+            });
+          } else {
+            // For level complete or pause, just resume
+            engine.running = true;
+            if (callback) callback();
+          }
+        };
+      }
+      
+      // Ensure welcome animation plays fully
+      const originalShowLoadingSequence = DiskSystem.prototype.showLoadingSequence;
+      DiskSystem.prototype.showLoadingSequence = function(disk) {
+        // Ensure the loading sequence gets enough time to complete
+        return new Promise(resolve => {
+          originalShowLoadingSequence.call(this, disk).then(() => {
+            // Add a slight delay to ensure the animation completes
+            setTimeout(resolve, 500);
+          });
         });
       };
       
-      // Set up start button and event listeners
-      startButton.addEventListener('click', initializeGame);
-      gameContainer.addEventListener('click', initializeGame);
-      
-      // Also allow keyboard to start
-      document.addEventListener('keydown', function startGameOnKeypress(e) {
-        if (!gameStarted) {
-          initializeGame();
-          document.removeEventListener('keydown', startGameOnKeypress);
+      // Load the selected disk with debug
+      console.log(`Loading disk: ${gameType}`);
+      engine.loadDisk(gameType).then(() => {
+        console.log(`Disk loaded: ${gameType}`);
+        console.log(`Game initialized: ${engine.currentGame ? 'Yes' : 'No'}`);
+        if (engine.currentGame && engine.currentGame instanceof ArcadeGame) {
+          console.log(`Enemies: ${engine.currentGame.enemies.length}`);
         }
       });
       
-      // Display initial start message
-      showStartMessage();
+      // Handle keyboard for text adventure input focus
+      document.addEventListener('keydown', function(e) {
+        if (engine.running) {
+          if (engine.currentGame instanceof TextAdventure && e.key.length === 1) {
+            // Focus game canvas for text input
+            gameContainer.focus();
+          }
+          
+          // Add game pause/resume functionality with Escape key
+          if (e.key === 'Escape') {
+            if (engine.running) {
+              showMessage('GAME PAUSED', 'Press CONTINUE to resume', () => {
+                // Resume game
+              });
+            }
+          }
+        }
+      });
+      
+      // Make sure the game container is focusable for keyboard events
+      gameContainer.tabIndex = 1;
+      gameContainer.focus();
     });
   </script>
 </body>
